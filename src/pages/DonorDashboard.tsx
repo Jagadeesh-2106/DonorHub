@@ -17,6 +17,12 @@ interface RequestResponse {
   id: string;
   request_id: string;
   response: 'accepted' | 'declined';
+  blood_request?: {
+    blood_group: string;
+    quantity: number;
+    created_at: string;
+    hospital_name: string;
+  };
 }
 
 const DonorDashboard: React.FC = () => {
@@ -69,11 +75,34 @@ const DonorDashboard: React.FC = () => {
 
         const { data: responsesData, error: responsesError } = await supabase
           .from('request_responses')
-          .select('id, request_id, response')
+          .select(`
+            id,
+            request_id,
+            response,
+            blood_requests (
+              blood_group,
+              quantity,
+              created_at,
+              hospitals (
+                hospital_name
+              )
+            )
+          `)
           .eq('donor_id', user.id);
 
         if (responsesError) throw responsesError;
-        setRequestResponses(responsesData || []);
+        const mappedResponses = (responsesData || []).map((r: any) => ({
+          id: r.id,
+          request_id: r.request_id,
+          response: r.response,
+          blood_request: r.blood_requests ? {
+            blood_group: r.blood_requests.blood_group,
+            quantity: r.blood_requests.quantity,
+            created_at: r.blood_requests.created_at,
+            hospital_name: r.blood_requests.hospitals?.hospital_name || 'Unknown Hospital',
+          } : undefined,
+        }));
+        setRequestResponses(mappedResponses);
       } catch (err: any) {
         setError(err.message || 'Failed to load data');
       }
@@ -127,9 +156,22 @@ const DonorDashboard: React.FC = () => {
       });
 
       if (error) throw error;
+      const targetRequest = activeRequests.find((r) => r.id === requestId);
       setRequestResponses((prev) => [
         ...prev.filter((r) => r.request_id !== requestId),
-        { id: '', request_id: requestId, response },
+        {
+          id: '',
+          request_id: requestId,
+          response,
+          blood_request: targetRequest
+            ? {
+                blood_group: targetRequest.blood_group,
+                quantity: targetRequest.quantity,
+                created_at: targetRequest.created_at,
+                hospital_name: targetRequest.hospital_name,
+              }
+            : undefined,
+        },
       ]);
     } catch (err: any) {
       setError(err.message || 'Failed to submit response');
@@ -289,15 +331,39 @@ const DonorDashboard: React.FC = () => {
             <div className="bg-white border border-border rounded-xl overflow-hidden shadow-subtle">
               <ul className="divide-y divide-border">
                 {requestResponses.map((resp, i) => (
-                  <li key={i} className="p-4 flex items-center justify-between hover:bg-slate-50 transition">
-                    <span className="text-sm font-semibold text-textPrimary">Request Reference ID: {resp.request_id.slice(0, 8)}...</span>
-                    <span
-                      className={`text-xs font-bold px-2.5 py-1 rounded-full ${
-                        resp.response === 'accepted' ? 'bg-success/15 text-success' : 'bg-error/15 text-error'
-                      }`}
-                    >
-                      {resp.response.toUpperCase()}
-                    </span>
+                  <li key={i} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/80 transition-all duration-200">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-textPrimary text-sm sm:text-base">
+                          {resp.blood_request?.hospital_name || 'Hospital Request'}
+                        </span>
+                        {resp.blood_request && (
+                          <span className="bg-primary/10 text-primary text-[10px] font-extrabold px-2 py-0.5 rounded">
+                            Group {resp.blood_request.blood_group}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-textSecondary">
+                        {resp.blood_request && (
+                          <>
+                            <p>Quantity: <strong className="text-textPrimary">{resp.blood_request.quantity} units</strong></p>
+                            <span className="hidden sm:inline text-slate-300">•</span>
+                            <p>Requested: {new Date(resp.blood_request.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })}</p>
+                            <span className="hidden sm:inline text-slate-300">•</span>
+                          </>
+                        )}
+                        <p className="font-mono text-[10px] text-slate-400">Ref ID: {resp.request_id.slice(0, 8)}...</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center self-start sm:self-center">
+                      <span
+                        className={`text-xs font-bold px-3 py-1.5 rounded-full select-none ${
+                          resp.response === 'accepted' ? 'bg-success/15 text-success' : 'bg-error/15 text-error'
+                        }`}
+                      >
+                        {resp.response.toUpperCase()}
+                      </span>
+                    </div>
                   </li>
                 ))}
               </ul>

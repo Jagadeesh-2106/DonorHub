@@ -109,7 +109,7 @@ const LandingPage: React.FC = () => {
         <div className="hidden md:block max-w-lg w-full transform hover:scale-102 transition-all duration-500 animate-fade-in-up delay-100">
           <div className="bg-white/80 p-8 rounded-2xl shadow-premium border border-primary/5 backdrop-blur-sm">
             <img
-              src="/assets/hero-illustration.svg"
+              src={`${import.meta.env.BASE_URL}assets/hero-illustration.svg`}
               alt="Blood donation illustration"
               className="w-full h-auto rounded-lg select-none"
             />
