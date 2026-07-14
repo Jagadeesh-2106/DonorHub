@@ -18,6 +18,7 @@ interface RequestDetailsData {
   quantity: number;
   status: string;
   created_at: string;
+  hospital_id: string;
   hospitals: {
     hospital_name: string;
   };
@@ -32,6 +33,8 @@ const RequestDetails: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [localStock, setLocalStock] = useState<number | null>(null);
+  const [fulfillingFromStorage, setFulfillingFromStorage] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -69,12 +72,28 @@ const RequestDetails: React.FC = () => {
           quantity: requestData.quantity,
           status: requestData.status,
           created_at: requestData.created_at,
+          hospital_id: requestData.hospital_id,
           hospitals: {
             hospital_name: Array.isArray(requestData.hospitals)
               ? (requestData.hospitals[0] as any)?.hospital_name || 'Unknown Hospital'
               : (requestData.hospitals as any)?.hospital_name || 'Unknown Hospital',
           },
         });
+
+        if (user.role === 'hospital' && requestData.hospital_id === user.id) {
+          const { data: invData, error: invError } = await supabase
+            .from('hospital_blood_inventory')
+            .select('quantity')
+            .eq('hospital_id', user.id)
+            .eq('blood_group', requestData.blood_group)
+            .maybeSingle();
+
+          if (!invError && invData) {
+            setLocalStock(invData.quantity);
+          } else {
+            setLocalStock(0);
+          }
+        }
 
         const { data: responsesData, error: respError } = await supabase
           .from('request_responses')
@@ -110,6 +129,52 @@ const RequestDetails: React.FC = () => {
 
     fetchData();
   }, [id, user]);
+
+  const handleFulfillFromStorage = async () => {
+    if (!id || !request || localStock === null || !user) return;
+    if (localStock < request.quantity) {
+      alert('Insufficient stock in your local blood storage.');
+      return;
+    }
+
+    const confirmFulfill = window.confirm(
+      `Are you sure you want to fulfill this request of ${request.quantity} unit(s) of ${request.blood_group} from your local storage? This will decrement your stock from ${localStock} to ${localStock - request.quantity}.`
+    );
+
+    if (!confirmFulfill) return;
+
+    setFulfillingFromStorage(true);
+    try {
+      // 1. Decrement inventory stock
+      const { error: invError } = await supabase
+        .from('hospital_blood_inventory')
+        .upsert({
+          hospital_id: user.id,
+          blood_group: request.blood_group,
+          quantity: localStock - request.quantity,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'hospital_id,blood_group' });
+
+      if (invError) throw invError;
+
+      // 2. Mark request as completed
+      const { error: reqError } = await supabase
+        .from('blood_requests')
+        .update({ status: 'completed' })
+        .eq('id', id);
+
+      if (reqError) throw reqError;
+
+      // 3. Update states
+      setLocalStock(localStock - request.quantity);
+      setRequest({ ...request, status: 'completed' });
+      alert('Request successfully fulfilled using your blood storage!');
+    } catch (err: any) {
+      alert(err.message || 'Failed to fulfill request from storage.');
+    } finally {
+      setFulfillingFromStorage(false);
+    }
+  };
 
   const updateStatus = async (newStatus: string) => {
     if (!id) return;
@@ -209,6 +274,55 @@ const RequestDetails: React.FC = () => {
             </p>
           </div>
         </section>
+
+        {/* Local Storage Fulfillment */}
+        {user?.role === 'hospital' && request.hospital_id === user.id && request.status === 'pending' && (
+          <section className="bg-white border border-border rounded-xl p-6 shadow-subtle space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h3 className="font-bold text-textPrimary text-base font-sans">Local Storage Fulfillment</h3>
+                <p className="text-xs text-textSecondary mt-0.5 font-sans">
+                  Check and consume units from your own blood bank registry to satisfy this request.
+                </p>
+              </div>
+              <div>
+                {localStock !== null ? (
+                  <div className="text-sm font-semibold font-sans">
+                    Current {request.blood_group} Stock:{' '}
+                    <span
+                      className={`font-black ${
+                        localStock >= request.quantity ? 'text-success' : 'text-error'
+                      }`}
+                    >
+                      {localStock} unit(s)
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-textSecondary font-sans">Checking inventory...</span>
+                )}
+              </div>
+            </div>
+
+            {localStock !== null && (
+              <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <p className="text-xs text-textSecondary max-w-lg font-sans">
+                  {localStock >= request.quantity
+                    ? `You have sufficient stock. Fulfilling will deduct ${request.quantity} units of ${request.blood_group} from your storage and complete the request.`
+                    : `You have insufficient stock (${localStock}/${request.quantity} units required). Please update your inventory in the dashboard or search nearby blood banks.`}
+                </p>
+                <Button
+                  variant="primary"
+                  onClick={handleFulfillFromStorage}
+                  disabled={localStock < request.quantity || fulfillingFromStorage}
+                  loading={fulfillingFromStorage}
+                  className="w-full sm:w-auto text-xs justify-center font-sans"
+                >
+                  Fulfill from Storage
+                </Button>
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Action Controls */}
         {(user?.role === 'hospital' || user?.role === 'admin') && request.status === 'pending' && (

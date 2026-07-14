@@ -214,3 +214,70 @@ $$ language plpgsql security definer;
 create or replace trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- ==========================================
+-- 11_hospital_blood_inventory.sql
+-- ==========================================
+-- Create hospital_blood_inventory table
+create table if not exists public.hospital_blood_inventory (
+  id uuid primary key default uuid_generate_v4(),
+  hospital_id uuid not null references public.hospitals(id) on delete cascade,
+  blood_group text not null,
+  quantity integer not null default 0,
+  created_at timestamp with time zone default timezone('utc', now()),
+  updated_at timestamp with time zone default timezone('utc', now()),
+  constraint hospital_blood_inventory_quantity_check check (quantity >= 0),
+  constraint hospital_blood_inventory_unique_group unique (hospital_id, blood_group)
+);
+
+-- Enable Row Level Security (RLS)
+alter table public.hospital_blood_inventory enable row level security;
+
+-- Allow select for all authenticated users (to search nearby blood banks)
+create policy "Inventory select authenticated" on public.hospital_blood_inventory
+  for select using (auth.role() = 'authenticated');
+
+-- Allow hospitals to manage their own blood inventory
+create policy "Hospitals insert own inventory" on public.hospital_blood_inventory
+  for insert with check (hospital_id = auth.uid());
+
+create policy "Hospitals update own inventory" on public.hospital_blood_inventory
+  for update using (hospital_id = auth.uid());
+
+create policy "Hospitals delete own inventory" on public.hospital_blood_inventory
+  for delete using (hospital_id = auth.uid());
+
+-- ==========================================
+-- 12_inter_hospital_requests.sql
+-- ==========================================
+-- Create inter_hospital_requests table
+create table if not exists public.inter_hospital_requests (
+  id uuid primary key default uuid_generate_v4(),
+  requester_id uuid not null references public.hospitals(id) on delete cascade,
+  provider_id uuid not null references public.hospitals(id) on delete cascade,
+  blood_group text not null,
+  quantity integer not null,
+  emergency_level text check (emergency_level in ('low', 'medium', 'high', 'critical')) not null,
+  purpose text not null,
+  status text check (status in ('pending', 'accepted', 'declined')) default 'pending' not null,
+  created_at timestamp with time zone default timezone('utc', now()),
+  updated_at timestamp with time zone default timezone('utc', now()),
+  constraint inter_hospital_requests_quantity_check check (quantity > 0)
+);
+
+-- Enable Row Level Security (RLS)
+alter table public.inter_hospital_requests enable row level security;
+
+-- Allow select for requester and provider hospitals
+create policy "Select own inter-hospital requests" on public.inter_hospital_requests
+  for select using (auth.uid() = requester_id or auth.uid() = provider_id);
+
+-- Allow requester hospital to insert requests
+create policy "Insert own inter-hospital requests" on public.inter_hospital_requests
+  for insert with check (auth.uid() = requester_id);
+
+-- Allow provider and requester to update requests
+create policy "Update own inter-hospital requests" on public.inter_hospital_requests
+  for update using (auth.uid() = requester_id or auth.uid() = provider_id);
+
+
