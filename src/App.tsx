@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router } from 'react-router-dom';
+import { HashRouter as Router } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import AppRoutes from './routes';
@@ -9,7 +9,7 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       <NotificationProvider>
-        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Router>
           <AppRoutes />
           <NotificationToast />
         </Router>
